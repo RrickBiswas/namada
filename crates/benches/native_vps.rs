@@ -5,9 +5,13 @@ use std::rc::Rc;
 use std::str::FromStr;
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use masp_primitives::sapling::redjubjub::PublicKey;
 use masp_primitives::sapling::Node;
 use masp_primitives::transaction::sighash::{signature_hash, SignableInput};
 use masp_primitives::transaction::txid::TxIdDigester;
+use masp_primitives::transaction::TransactionData;
+use masp_proofs::group::GroupEncoding;
+use masp_proofs::sapling::BatchValidator;
 use namada::core::address::{self, Address, InternalAddress};
 use namada::core::collections::HashMap;
 use namada::core::eth_bridge_pool::{GasFee, PendingTransfer};
@@ -46,13 +50,10 @@ use namada::ledger::pgf::PgfVp;
 use namada::ledger::pos::PosVP;
 use namada::proof_of_stake;
 use namada::proof_of_stake::KeySeg;
-use namada::sdk::masp::{
-    check_convert, check_output, check_spend, partial_deauthorize,
-    preload_verifying_keys, PVKs,
-};
+use namada::sdk::masp::{partial_deauthorize, preload_verifying_keys, PVKs};
 use namada::sdk::masp_primitives::merkle_tree::CommitmentTree;
 use namada::sdk::masp_primitives::transaction::Transaction;
-use namada::sdk::masp_proofs::sapling::SaplingVerificationContext;
+use namada::sdk::masp_proofs::sapling::SaplingVerificationContextInner;
 use namada::state::{Epoch, StorageRead, StorageWrite, TxIndex};
 use namada::token::{Amount, Transfer};
 use namada::tx::{Code, Section, Tx};
@@ -63,6 +64,7 @@ use namada_apps::bench_utils::{
     TX_TRANSFER_WASM, TX_UPDATE_STEWARD_COMMISSION, TX_VOTE_PROPOSAL_WASM,
 };
 use namada_apps::wallet::defaults;
+use rand_core::OsRng;
 
 fn governance(c: &mut Criterion) {
     let mut group = c.benchmark_group("vp_governance");
@@ -224,15 +226,13 @@ fn governance(c: &mut Criterion) {
 
         group.bench_function(bench_name, |b| {
             b.iter(|| {
-                assert!(
-                    governance
-                        .validate_tx(
-                            &signed_tx,
-                            governance.ctx.keys_changed,
-                            governance.ctx.verifiers,
-                        )
-                        .is_ok()
-                )
+                assert!(governance
+                    .validate_tx(
+                        &signed_tx,
+                        governance.ctx.keys_changed,
+                        governance.ctx.verifiers,
+                    )
+                    .is_ok())
             })
         });
     }
@@ -444,14 +444,13 @@ fn ibc(c: &mut Criterion) {
 
         group.bench_function(bench_name, |b| {
             b.iter(|| {
-                assert!(
-                    ibc.validate_tx(
+                assert!(ibc
+                    .validate_tx(
                         &signed_tx,
                         ibc.ctx.keys_changed,
                         ibc.ctx.verifiers,
                     )
-                    .is_ok()
-                )
+                    .is_ok())
             })
         });
     }
@@ -509,15 +508,13 @@ fn vp_multitoken(c: &mut Criterion) {
 
         group.bench_function(bench_name, |b| {
             b.iter(|| {
-                assert!(
-                    multitoken
-                        .validate_tx(
-                            signed_tx,
-                            multitoken.ctx.keys_changed,
-                            multitoken.ctx.verifiers,
-                        )
-                        .is_ok()
-                )
+                assert!(multitoken
+                    .validate_tx(
+                        signed_tx,
+                        multitoken.ctx.keys_changed,
+                        multitoken.ctx.verifiers,
+                    )
+                    .is_ok())
             })
         });
     }
@@ -620,14 +617,13 @@ fn masp(c: &mut Criterion) {
             };
 
             b.iter(|| {
-                assert!(
-                    masp.validate_tx(
+                assert!(masp
+                    .validate_tx(
                         &signed_tx,
                         masp.ctx.keys_changed,
                         masp.ctx.verifiers,
                     )
-                    .is_ok()
-                );
+                    .is_ok());
             })
         });
     }
@@ -635,11 +631,11 @@ fn masp(c: &mut Criterion) {
     group.finish();
 }
 
+// Instead of benchmarking BatchValidator::check_bundle we benchmark the 4
+// functions that are called internally for better resolution
 fn masp_check_spend(c: &mut Criterion) {
-    let spend_vk = &preload_verifying_keys().spend_vk;
-
     c.bench_function("vp_masp_check_spend", |b| {
-        b.iter_batched_ref(
+        b.iter_batched(
             || {
                 let (_, _verifiers_from_tx, signed_tx) =
                     setup_storage_for_masp_verification("shielded");
@@ -662,7 +658,7 @@ fn masp_check_spend(c: &mut Criterion) {
                     .first()
                     .unwrap()
                     .to_owned();
-                let ctx = SaplingVerificationContext::new(true);
+                let ctx = SaplingVerificationContextInner::new();
                 let tx_data = transaction.deref();
                 // Partially deauthorize the transparent bundle
                 let unauth_tx_data = partial_deauthorize(tx_data).unwrap();
@@ -672,11 +668,28 @@ fn masp_check_spend(c: &mut Criterion) {
                     &SignableInput::Shielded,
                     &txid_parts,
                 );
+                let zkproof = masp_proofs::bellman::groth16::Proof::read(
+                    spend.zkproof.as_slice(),
+                )
+                .unwrap();
 
-                (ctx, spend, sighash)
+                (ctx, spend, sighash, zkproof)
             },
-            |(ctx, spend, sighash)| {
-                assert!(check_spend(spend, sighash.as_ref(), ctx, spend_vk));
+            |(mut ctx, spend, sighash, zkproof)| {
+                assert!(ctx.check_spend(
+                    spend.cv,
+                    spend.anchor,
+                    &spend.nullifier.0,
+                    PublicKey(spend.rk.0),
+                    sighash.as_ref(),
+                    spend.spend_auth_sig,
+                    zkproof,
+                    &mut (),
+                    // We do sig and proofs verification in parallel, so just
+                    // use dummy verifiers here
+                    |_, _, _, _| true,
+                    |_, _, _| true
+                ));
             },
             BatchSize::SmallInput,
         )
@@ -684,10 +697,8 @@ fn masp_check_spend(c: &mut Criterion) {
 }
 
 fn masp_check_convert(c: &mut Criterion) {
-    let convert_vk = &preload_verifying_keys().convert_vk;
-
     c.bench_function("vp_masp_check_convert", |b| {
-        b.iter_batched_ref(
+        b.iter_batched(
             || {
                 let (_, _verifiers_from_tx, signed_tx) =
                     setup_storage_for_masp_verification("shielded");
@@ -710,12 +721,24 @@ fn masp_check_convert(c: &mut Criterion) {
                     .first()
                     .unwrap()
                     .to_owned();
-                let ctx = SaplingVerificationContext::new(true);
+                let ctx = SaplingVerificationContextInner::new();
+                let zkproof = masp_proofs::bellman::groth16::Proof::read(
+                    convert.zkproof.as_slice(),
+                )
+                .unwrap();
 
-                (ctx, convert)
+                (ctx, convert, zkproof)
             },
-            |(ctx, convert)| {
-                assert!(check_convert(convert, ctx, convert_vk));
+            |(mut ctx, convert, zkproof)| {
+                assert!(ctx.check_convert(
+                    convert.cv,
+                    convert.anchor,
+                    zkproof,
+                    &mut (),
+                    // We do proofs verification in parallel, so just use dummy
+                    // verifier here
+                    |_, _, _| true,
+                ));
             },
             BatchSize::SmallInput,
         )
@@ -723,10 +746,8 @@ fn masp_check_convert(c: &mut Criterion) {
 }
 
 fn masp_check_output(c: &mut Criterion) {
-    let output_vk = &preload_verifying_keys().output_vk;
-
     c.bench_function("masp_vp_check_output", |b| {
-        b.iter_batched_ref(
+        b.iter_batched(
             || {
                 let (_, _verifiers_from_tx, signed_tx) =
                     setup_storage_for_masp_verification("shielded");
@@ -749,12 +770,28 @@ fn masp_check_output(c: &mut Criterion) {
                     .first()
                     .unwrap()
                     .to_owned();
-                let ctx = SaplingVerificationContext::new(true);
+                let ctx = SaplingVerificationContextInner::new();
+                let zkproof = masp_proofs::bellman::groth16::Proof::read(
+                    output.zkproof.as_slice(),
+                )
+                .unwrap();
+                let epk = masp_proofs::jubjub::ExtendedPoint::from_bytes(
+                    &output.ephemeral_key.0,
+                )
+                .unwrap();
 
-                (ctx, output)
+                (ctx, output, epk, zkproof)
             },
-            |(ctx, output)| {
-                assert!(check_output(output, ctx, output_vk));
+            |(mut ctx, output, epk, zkproof)| {
+                assert!(ctx.check_output(
+                    output.cv,
+                    output.cmu,
+                    epk,
+                    zkproof,
+                    // We do proofs verification in parallel, so just use dummy
+                    // verifier here
+                    |_, _| true
+                ));
             },
             BatchSize::SmallInput,
         )
@@ -762,12 +799,6 @@ fn masp_check_output(c: &mut Criterion) {
 }
 
 fn masp_final_check(c: &mut Criterion) {
-    let PVKs {
-        spend_vk,
-        convert_vk,
-        output_vk,
-    } = preload_verifying_keys();
-
     let (_, _verifiers_from_tx, signed_tx) =
         setup_storage_for_masp_verification("shielded");
 
@@ -783,39 +814,272 @@ fn masp_final_check(c: &mut Criterion) {
         .unwrap()
         .to_owned();
     let sapling_bundle = transaction.sapling_bundle().unwrap();
-    let mut ctx = SaplingVerificationContext::new(true);
     // Partially deauthorize the transparent bundle
     let unauth_tx_data = partial_deauthorize(transaction.deref()).unwrap();
     let txid_parts = unauth_tx_data.digest(TxIdDigester);
     let sighash =
         signature_hash(&unauth_tx_data, &SignableInput::Shielded, &txid_parts);
+    let mut ctx = SaplingVerificationContextInner::new();
 
     // Check spends, converts and outputs before the final check
     assert!(sapling_bundle.shielded_spends.iter().all(|spend| {
-        check_spend(spend, sighash.as_ref(), &mut ctx, spend_vk)
+        let zkproof = masp_proofs::bellman::groth16::Proof::read(
+            spend.zkproof.as_slice(),
+        )
+        .unwrap();
+
+        ctx.check_spend(
+            spend.cv,
+            spend.anchor,
+            &spend.nullifier.0,
+            PublicKey(spend.rk.0),
+            sighash.as_ref(),
+            spend.spend_auth_sig,
+            zkproof,
+            &mut (),
+            |_, _, _, _| true,
+            |_, _, _| true,
+        )
     }));
-    assert!(
-        sapling_bundle
-            .shielded_converts
-            .iter()
-            .all(|convert| check_convert(convert, &mut ctx, convert_vk))
-    );
-    assert!(
-        sapling_bundle
-            .shielded_outputs
-            .iter()
-            .all(|output| check_output(output, &mut ctx, output_vk))
-    );
+    assert!(sapling_bundle.shielded_converts.iter().all(|convert| {
+        let zkproof = masp_proofs::bellman::groth16::Proof::read(
+            convert.zkproof.as_slice(),
+        )
+        .unwrap();
+        ctx.check_convert(
+            convert.cv,
+            convert.anchor,
+            zkproof,
+            &mut (),
+            |_, _, _| true,
+        )
+    }));
+    assert!(sapling_bundle.shielded_outputs.iter().all(|output| {
+        let zkproof = masp_proofs::bellman::groth16::Proof::read(
+            output.zkproof.as_slice(),
+        )
+        .unwrap();
+        let epk = masp_proofs::jubjub::ExtendedPoint::from_bytes(
+            &output.ephemeral_key.0,
+        )
+        .unwrap();
+        ctx.check_output(
+            output.cv,
+            output.cmu,
+            epk.to_owned(),
+            zkproof,
+            |_, _| true,
+        )
+    }));
 
     c.bench_function("vp_masp_final_check", |b| {
         b.iter(|| {
             assert!(ctx.final_check(
                 sapling_bundle.value_balance.clone(),
                 sighash.as_ref(),
-                sapling_bundle.authorization.binding_sig
+                sapling_bundle.authorization.binding_sig,
+                // We do sig verification in parallel, so just use dummy
+                // verifier here
+                |_, _, _| true
             ))
         })
     });
+}
+
+#[derive(Debug)]
+enum RequestedItem {
+    Signature,
+    Spend,
+    Convert,
+    Output,
+}
+
+// Removes the unneeded notes from the generated transaction and replicates the
+// remaining ones if needed
+fn customize_masp_tx_data(
+    multi: bool,
+    request: &RequestedItem,
+) -> Option<(
+    TransactionData<masp_primitives::transaction::Authorized>,
+    Transaction,
+)> {
+    let (_, tx) = setup_storage_for_masp_verification("unshielding");
+    let transaction = tx
+        .sections
+        .into_iter()
+        .filter_map(|section| match section {
+            Section::MaspTx(transaction) => Some(transaction),
+            _ => None,
+        })
+        .collect::<Vec<Transaction>>()
+        .first()
+        .unwrap()
+        .to_owned();
+    let mut sapling_bundle = transaction.sapling_bundle().unwrap().to_owned();
+
+    match request {
+        RequestedItem::Signature => {
+            if multi {
+                // No multisig benchmark
+                return None;
+            }
+            // ensure we only have one signature to verify (the binding one) and
+            // no proofs
+            sapling_bundle.shielded_spends.clear();
+            sapling_bundle.shielded_converts.clear();
+            sapling_bundle.shielded_outputs.clear();
+            assert_eq!(sapling_bundle.shielded_spends.len(), 0);
+            assert_eq!(sapling_bundle.shielded_converts.len(), 0);
+            assert_eq!(sapling_bundle.shielded_outputs.len(), 0);
+        }
+        RequestedItem::Spend => {
+            if multi {
+                // ensure we only have two spend proofs
+                sapling_bundle.shielded_spends = [
+                    sapling_bundle.shielded_spends.clone(),
+                    sapling_bundle.shielded_spends,
+                ]
+                .concat();
+                sapling_bundle.shielded_outputs.clear();
+                sapling_bundle.shielded_converts.clear();
+                assert_eq!(sapling_bundle.shielded_spends.len(), 2);
+            } else {
+                // ensure we only have one spend proof
+                sapling_bundle.shielded_outputs.clear();
+                sapling_bundle.shielded_converts.clear();
+                assert_eq!(sapling_bundle.shielded_spends.len(), 1);
+            }
+            assert_eq!(sapling_bundle.shielded_converts.len(), 0);
+            assert_eq!(sapling_bundle.shielded_outputs.len(), 0);
+        }
+        RequestedItem::Convert => {
+            if multi {
+                // ensure we only have two convert proofs
+                sapling_bundle.shielded_converts = [
+                    sapling_bundle.shielded_converts.clone(),
+                    sapling_bundle.shielded_converts,
+                ]
+                .concat();
+                sapling_bundle.shielded_spends.clear();
+                sapling_bundle.shielded_outputs.clear();
+                assert_eq!(sapling_bundle.shielded_converts.len(), 2);
+            } else {
+                // ensure we only have one convert proof
+                sapling_bundle.shielded_spends.clear();
+                sapling_bundle.shielded_outputs.clear();
+                assert_eq!(sapling_bundle.shielded_converts.len(), 1);
+            }
+            assert_eq!(sapling_bundle.shielded_spends.len(), 0);
+            assert_eq!(sapling_bundle.shielded_outputs.len(), 0);
+        }
+        RequestedItem::Output => {
+            // From the cost remove the cost of signature(s) validation
+            if multi {
+                // ensure we only have two output proofs
+                sapling_bundle.shielded_outputs = [
+                    sapling_bundle.shielded_outputs.clone(),
+                    sapling_bundle.shielded_outputs,
+                ]
+                .concat();
+                sapling_bundle.shielded_spends.clear();
+                sapling_bundle.shielded_converts.clear();
+                assert_eq!(sapling_bundle.shielded_outputs.len(), 2);
+            } else {
+                // ensure we only have one output proof
+                sapling_bundle.shielded_spends.clear();
+                sapling_bundle.shielded_converts.clear();
+                assert_eq!(sapling_bundle.shielded_outputs.len(), 1);
+            }
+            assert_eq!(sapling_bundle.shielded_spends.len(), 0);
+            assert_eq!(sapling_bundle.shielded_converts.len(), 0);
+        }
+    };
+
+    Some((
+        TransactionData::from_parts(
+            transaction.version(),
+            transaction.consensus_branch_id(),
+            transaction.lock_time(),
+            transaction.expiry_height(),
+            transaction.transparent_bundle().cloned(),
+            Some(sapling_bundle),
+        ),
+        transaction,
+    ))
+}
+
+// For signatures: it's impossible to benchmark more than one signature without
+// pulling in the cost of a proof, so we just benchmark the cost of one binding
+// signature and then use its cost. We don't discount by the numebr of cores
+// because there might be the need for a call to the fallback single
+// verification.. For proofs: benchmarks both one and two proofs and take the
+// difference as the variable cost for every proofs/sigs. Compute the cost of
+// the non parallel parts (with the diff) and charge that if at least one note
+// is present, then charge the variable cost multiplied by the number of notes
+// and divided by the number of cores
+fn masp_batch_validate(c: &mut Criterion) {
+    let mut group = c.benchmark_group("masp_batch_validate");
+    let PVKs {
+        spend_vk,
+        convert_vk,
+        output_vk,
+    } = preload_verifying_keys();
+
+    for multi in [true, false] {
+        for bench in [
+            RequestedItem::Signature,
+            RequestedItem::Spend,
+            RequestedItem::Convert,
+            RequestedItem::Output,
+        ] {
+            // From the cost of proofs remove the cost of signature(s)
+            // validation
+            let (tx_data, transaction) =
+                if let Some(data) = customize_masp_tx_data(multi, &bench) {
+                    data
+                } else {
+                    continue;
+                };
+
+            // Partially deauthorize the transparent bundle
+            let unauth_tx_data =
+                partial_deauthorize(transaction.deref()).unwrap();
+            let txid_parts = unauth_tx_data.digest(TxIdDigester);
+            let sighash = signature_hash(
+                &unauth_tx_data,
+                &SignableInput::Shielded,
+                &txid_parts,
+            )
+            .as_ref()
+            .to_owned();
+            let sapling_bundle = tx_data.sapling_bundle().unwrap();
+
+            let bench_name = if multi {
+                format!("{:#?}_multi", bench)
+            } else {
+                format!("{:#?}_single", bench)
+            };
+            group.bench_function(bench_name, |b| {
+                b.iter_batched(
+                    || {
+                        let mut ctx = BatchValidator::new();
+                        // Check bundle first
+                        if !ctx.check_bundle(sapling_bundle.to_owned(), sighash)
+                        {
+                            panic!("Failed check bundle");
+                        }
+
+                        ctx
+                    },
+                    |ctx| {
+                        assert!(ctx
+                            .validate(spend_vk, convert_vk, output_vk, OsRng))
+                    },
+                    BatchSize::SmallInput,
+                )
+            });
+        }
+    }
 }
 
 fn pgf(c: &mut Criterion) {
@@ -891,14 +1155,13 @@ fn pgf(c: &mut Criterion) {
 
         group.bench_function(bench_name, |b| {
             b.iter(|| {
-                assert!(
-                    pgf.validate_tx(
+                assert!(pgf
+                    .validate_tx(
                         &signed_tx,
                         pgf.ctx.keys_changed,
                         pgf.ctx.verifiers,
                     )
-                    .is_ok()
-                )
+                    .is_ok())
             })
         });
     }
@@ -967,14 +1230,13 @@ fn eth_bridge_nut(c: &mut Criterion) {
 
     c.bench_function("vp_eth_bridge_nut", |b| {
         b.iter(|| {
-            assert!(
-                nut.validate_tx(
+            assert!(nut
+                .validate_tx(
                     &signed_tx,
                     nut.ctx.keys_changed,
                     nut.ctx.verifiers,
                 )
-                .is_ok()
-            )
+                .is_ok())
         })
     });
 }
@@ -1039,15 +1301,13 @@ fn eth_bridge(c: &mut Criterion) {
 
     c.bench_function("vp_eth_bridge", |b| {
         b.iter(|| {
-            assert!(
-                eth_bridge
-                    .validate_tx(
-                        &signed_tx,
-                        eth_bridge.ctx.keys_changed,
-                        eth_bridge.ctx.verifiers,
-                    )
-                    .is_ok()
-            )
+            assert!(eth_bridge
+                .validate_tx(
+                    &signed_tx,
+                    eth_bridge.ctx.keys_changed,
+                    eth_bridge.ctx.verifiers,
+                )
+                .is_ok())
         })
     });
 }
@@ -1137,15 +1397,13 @@ fn eth_bridge_pool(c: &mut Criterion) {
 
     c.bench_function("vp_eth_bridge_pool", |b| {
         b.iter(|| {
-            assert!(
-                bridge_pool
-                    .validate_tx(
-                        &signed_tx,
-                        bridge_pool.ctx.keys_changed,
-                        bridge_pool.ctx.verifiers,
-                    )
-                    .is_ok()
-            )
+            assert!(bridge_pool
+                .validate_tx(
+                    &signed_tx,
+                    bridge_pool.ctx.keys_changed,
+                    bridge_pool.ctx.verifiers,
+                )
+                .is_ok())
         })
     });
 }
@@ -1205,15 +1463,13 @@ fn parameters(c: &mut Criterion) {
 
         group.bench_function(bench_name, |b| {
             b.iter(|| {
-                assert!(
-                    parameters
-                        .validate_tx(
-                            &signed_tx,
-                            parameters.ctx.keys_changed,
-                            parameters.ctx.verifiers,
-                        )
-                        .is_ok()
-                )
+                assert!(parameters
+                    .validate_tx(
+                        &signed_tx,
+                        parameters.ctx.keys_changed,
+                        parameters.ctx.verifiers,
+                    )
+                    .is_ok())
             })
         });
     }
@@ -1276,14 +1532,13 @@ fn pos(c: &mut Criterion) {
 
         group.bench_function(bench_name, |b| {
             b.iter(|| {
-                assert!(
-                    pos.validate_tx(
+                assert!(pos
+                    .validate_tx(
                         &signed_tx,
                         pos.ctx.keys_changed,
                         pos.ctx.verifiers,
                     )
-                    .is_ok()
-                )
+                    .is_ok())
             })
         });
     }
@@ -1414,6 +1669,7 @@ criterion_group!(
     masp_check_convert,
     masp_check_output,
     masp_final_check,
+    masp_batch_validate,
     vp_multitoken,
     pgf,
     eth_bridge_nut,

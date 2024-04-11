@@ -50,6 +50,7 @@ namada-eth-bridge = [
 namada = { path = "../namada", features = ["rand", "benches"] }
 namada_apps = { path = "../apps", features = ["benches"] }
 masp_primitives.workspace = true
+masp_proofs = { workspace = true, features = ["multicore"] }
 borsh.workspace = true
 borsh-ext.workspace = true
 criterion = { version = "0.5", features = ["html_reports"] }
