@@ -194,7 +194,6 @@ pub fn dump_tx<IO: Io>(io: &IO, args: &args::Tx, tx: Tx) {
 
 /// Prepare a transaction for signing and submission by adding a wrapper header
 /// to it.
-#[allow(clippy::too_many_arguments)]
 pub async fn prepare_tx(
     args: &args::Tx,
     tx: &mut Tx,
@@ -234,9 +233,6 @@ pub async fn process_tx(
         // We use this to determine when the decrypted inner tx makes it
         // on-chain
         let to_broadcast = TxBroadcastData::Live { tx, tx_hash };
-        // TODO: implement the code to resubmit the wrapper if it fails because
-        // of masp epoch Either broadcast or submit transaction and
-        // collect result into sum type
         if args.broadcast_only {
             broadcast_tx(context, &to_broadcast)
                 .await
@@ -330,9 +326,6 @@ pub async fn broadcast_tx(
         "Broadcasting transaction",
     );
 
-    // TODO: configure an explicit timeout value? we need to hack away at
-    // `tendermint-rs` for this, which is currently using a hard-coded 30s
-    // timeout.
     let response = lift_rpc_error(
         context.client().broadcast_tx_sync(tx.to_bytes()).await,
     )?;
@@ -2078,7 +2071,6 @@ pub async fn build_default_proposal(
             };
             Ok(())
         };
-    // TODO: need to pay the fee to submit a proposal, check enough balance
     build(
         context,
         tx,
@@ -2462,7 +2454,6 @@ pub async fn build_pgf_funding_proposal(
         validate_fee_and_gen_unshield(context, tx, &signing_data.fee_payer)
             .await?;
 
-    // TODO: need to pay the fee to submit a proposal, check enough balance
     let init_proposal_data = InitProposalData::try_from(proposal.clone())
         .map_err(|e| TxSubmitError::InvalidProposal(e.to_string()))?;
 
@@ -2510,7 +2501,6 @@ pub async fn build_pgf_stewards_proposal(
         validate_fee_and_gen_unshield(context, tx, &signing_data.fee_payer)
             .await?;
 
-    // TODO: need to pay the fee to submit a proposal, check enough balance
     let init_proposal_data = InitProposalData::try_from(proposal.clone())
         .map_err(|e| TxSubmitError::InvalidProposal(e.to_string()))?;
 
@@ -2948,7 +2938,8 @@ pub async fn build_transfer<N: Namada>(
     // This has no side-effect because transaction is to self.
     let (transparent_amount, transparent_token) =
         if source == masp_addr && target == masp_addr {
-            // TODO Refactor me, we shouldn't rely on any specific token here.
+            // TODO(namada#1677): Refactor me, we shouldn't rely on any specific
+            // token here.
             (token::Amount::zero().into(), context.native_token())
         } else {
             (validated_amount, args.token.clone())

@@ -296,7 +296,7 @@ construct_uint! {
         BorshDeserializer,
         BorshSchema,
     )]
-
+    #[repr(align(32))]
     pub struct Uint(4);
 }
 

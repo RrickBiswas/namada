@@ -3,6 +3,7 @@ use std::ops::ControlFlow;
 
 use namada::control_flow::time;
 use namada::time::{DateTimeUtc, Utc};
+use tendermint_rpc::client::CompatMode;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::facade::tendermint_rpc::{Client, HttpClient};
@@ -23,8 +24,13 @@ impl Broadcaster {
     /// over the given url.
     pub fn new(url: SocketAddr, receiver: UnboundedReceiver<Vec<u8>>) -> Self {
         Self {
-            client: HttpClient::new(format!("http://{}", url).as_str())
-                .unwrap(),
+            client: HttpClient::builder(
+                format!("http://{}", url).as_str().try_into().unwrap(),
+            )
+            .compat_mode(CompatMode::V0_37)
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap(),
             receiver,
         }
     }

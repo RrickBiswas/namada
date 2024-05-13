@@ -7,6 +7,7 @@ pub mod utils;
 
 use std::str::FromStr;
 
+pub use masp_primitives::transaction;
 use namada_core::borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
 use namada_core::dec::Dec;
 pub use namada_storage::conversion_state::{
@@ -38,7 +39,7 @@ pub struct ShieldedParams {
     /// Shielded Pool nominal proportional gain for the given token
     pub kp_gain_nom: Dec,
     /// Target amount for the given token that is locked in the shielded pool
-    /// TODO: should this be a Uint or DenominatedAmount???
+    // TODO(namada#3255): use `Uint` here
     pub locked_amount_target: u64,
 }
 

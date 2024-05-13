@@ -522,7 +522,7 @@ where
                 tx_wasm_compilation_cache as usize,
             ),
             storage_read_past_height_limit,
-            // TODO: config event log params
+            // TODO(namada#3237): config event log params
             event_log: EventLog::default(),
         };
         shell.update_eth_oracle(&Default::default());
@@ -673,19 +673,13 @@ where
                 .borrow()
                 .as_ref()
                 .cloned();
-            match last_processed_block {
-                Some(eth_height) => {
-                    tracing::info!(
-                        "Ethereum oracle's most recently processed Ethereum \
-                         block is {}",
-                        eth_height
-                    );
-                    self.state.in_mem_mut().ethereum_height = Some(eth_height);
-                }
-                None => tracing::info!(
-                    "Ethereum oracle has not yet fully processed any Ethereum \
-                     blocks"
-                ),
+            if let Some(eth_height) = last_processed_block {
+                tracing::info!(
+                    "Ethereum oracle's most recently processed Ethereum block \
+                     is {}",
+                    eth_height
+                );
+                self.state.in_mem_mut().ethereum_height = Some(eth_height);
             }
         }
     }
@@ -790,14 +784,14 @@ where
                      in storage or not",
                 );
             if !has_key {
-                tracing::info!(
+                tracing::debug!(
                     "Not starting oracle yet as storage has not been \
                      initialized"
                 );
                 return;
             }
             let Some(config) = EthereumOracleConfig::read(&self.state) else {
-                tracing::info!(
+                tracing::debug!(
                     "Not starting oracle as the Ethereum bridge config \
                      couldn't be found in storage"
                 );
@@ -807,13 +801,13 @@ where
                 if !changed_keys
                     .contains(&namada::eth_bridge::storage::active_key())
                 {
-                    tracing::info!(
+                    tracing::debug!(
                         "Not starting oracle as the Ethereum bridge is \
                          disabled"
                     );
                     return;
                 } else {
-                    tracing::info!(
+                    tracing::debug!(
                         "Disabling oracle as the bridge has been disabled"
                     );
                     false
@@ -831,7 +825,7 @@ where
             tracing::info!(
                 ?start_block,
                 "Found Ethereum height from which the Ethereum oracle should \
-                 start"
+                 be updated"
             );
             let config = namada::eth_bridge::oracle::config::Config {
                 min_confirmations: config.min_confirmations.into(),
@@ -841,7 +835,7 @@ where
             };
             tracing::info!(
                 ?config,
-                "Starting the Ethereum oracle using values from block storage"
+                "Updating the Ethereum oracle using values from block storage"
             );
             if let Err(error) = control_sender
                 .try_send(oracle::control::Command::UpdateConfig(config))

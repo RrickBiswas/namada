@@ -31,8 +31,6 @@ use namada_core::ibc::core::host::types::path::Path;
 use namada_core::ibc::primitives::proto::Any;
 use prost::Message;
 
-// TODO: #[derive(ClientState)] doesn't support contexts with contexts generic
-// for now
 /// ClientState for light clients
 #[derive(Debug, Clone)]
 pub enum AnyClientState {

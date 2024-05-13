@@ -3381,7 +3381,6 @@ pub mod args {
 
     #[derive(Clone, Debug)]
     pub struct LedgerDumpDb {
-        // TODO: allow to specify height
         pub block_height: Option<BlockHeight>,
         pub out_file_path: PathBuf,
         pub historic: bool,

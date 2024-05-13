@@ -67,10 +67,9 @@ pub mod wrapper_tx {
         Eq,
     )]
     pub struct Fee {
-        /// amount of fee per gas unit
+        /// Amount of fees paid per gas unit.
         pub amount_per_gas_unit: DenominatedAmount,
-        /// address of the token
-        /// TODO: This should support multi-tokens
+        /// Address of the fee token.
         pub token: Address,
     }
 

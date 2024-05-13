@@ -221,7 +221,7 @@ where
     ) -> ControlFlow<()> {
         let ts: protobuf::Timestamp = init.time.into();
         let initial_height = init.initial_height.into();
-        // TODO hacky conversion, depends on https://github.com/informalsystems/tendermint-rs/issues/870
+        // TODO(informalsystems/tendermint-rs#870): hacky conversion
         let genesis_time: DateTimeUtc = (Utc
             .timestamp_opt(ts.seconds, ts.nanos as u32))
         .single()
@@ -627,8 +627,6 @@ where
                     .write(&protocol_pk_key(address), &protocol_key.pk.raw)
                     .expect("Unable to set genesis user protocol public key");
 
-                // TODO: replace pos::init_genesis validators arg with
-                // init_genesis_validator from here
                 if let Err(err) = pos::namada_proof_of_stake::become_validator(
                     &mut self.state,
                     BecomeValidator {

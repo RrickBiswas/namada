@@ -634,7 +634,6 @@ pub async fn validate_fee_and_gen_unshield<N: Namada>(
 /// Create a wrapper tx from a normal tx. Get the hash of the
 /// wrapper and its payload which is needed for monitoring its
 /// progress on chain.
-#[allow(clippy::too_many_arguments)]
 pub async fn wrap_tx(
     tx: &mut Tx,
     args: &args::Tx<SdkTypes>,
@@ -656,7 +655,7 @@ pub async fn wrap_tx(
             token: args.fee_token.clone(),
         },
         fee_payer,
-        // TODO: partially validate the gas limit in client
+        // TODO(namada#1625): partially validate the gas limit in client
         args.gas_limit,
         unshield_section_hash,
     );

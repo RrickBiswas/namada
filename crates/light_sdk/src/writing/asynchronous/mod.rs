@@ -31,9 +31,8 @@ pub async fn broadcast_tx(
     // on-chain
     let decrypted_tx_hash = tx.raw_header_hash().to_string();
 
-    // TODO: configure an explicit timeout value? we need to hack away at
-    // `tendermint-rs` for this, which is currently using a hard-coded 30s
-    // timeout.
+    // NOTE: if we need an explicit client timeout, use
+    // `HttpClient::builder` to instantiate client
     let response = client
         .broadcast_tx_sync(tx.to_bytes())
         .await
