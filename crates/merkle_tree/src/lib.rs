@@ -1419,7 +1419,7 @@ mod test {
                 &value,
             ));
             // for the verification of the base tree
-            value = sub_root.clone();
+            value.clone_from(&sub_root);
         }
         // Check the base root
         assert_eq!(sub_root, tree.root().0);
@@ -1483,7 +1483,7 @@ mod test {
                 &value,
             ));
             // for the verification of the base tree
-            value = sub_root.clone();
+            value.clone_from(&sub_root);
         }
         // Check the base root
         assert_eq!(sub_root, tree.root().0);

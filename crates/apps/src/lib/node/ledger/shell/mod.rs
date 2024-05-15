@@ -1072,7 +1072,7 @@ where
                         response.code = ResultCode::InvalidTx.into();
                         response.log = "The wrapper gas limit overflowed gas \
                                         representation"
-                            .to_owned();
+                            .to_string();
                         return response;
                     }
                 };
