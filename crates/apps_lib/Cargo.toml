@@ -99,7 +99,6 @@ serde_bytes.workspace = true
 serde_json = {workspace = true, features = ["raw_value"]}
 serde.workspace = true
 sha2.workspace = true
-signal-hook.workspace = true
 smooth-operator.workspace = true
 sysinfo.workspace = true
 tar.workspace = true
@@ -110,7 +109,6 @@ textwrap-macros = "0.3.0"
 thiserror.workspace = true
 tokio = {workspace = true, features = ["full"]}
 toml.workspace = true
-tonic.workspace = true
 tower-abci.workspace = true
 tower.workspace = true
 tracing-appender.workspace = true
