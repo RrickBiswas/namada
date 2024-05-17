@@ -42,7 +42,7 @@ use crate::token::storage_key::{
 };
 use crate::vm::memory::VmMemory;
 use crate::vm::prefix_iter::{PrefixIteratorId, PrefixIterators};
-use crate::vm::{HostRef, MutHostRef};
+use crate::vm::{HostRef, RoAccess, RwAccess};
 
 /// These runtime errors will abort tx WASM execution immediately
 #[allow(missing_docs)]
@@ -89,7 +89,7 @@ pub enum TxRuntimeError {
 pub type TxResult<T> = std::result::Result<T, TxRuntimeError>;
 
 /// A transaction's host environment
-pub struct TxVmEnv<'a, MEM, D, H, CA>
+pub struct TxVmEnv<MEM, D, H, CA>
 where
     MEM: VmMemory,
     D: DB + for<'iter> DBIter<'iter>,
@@ -99,47 +99,47 @@ where
     /// The VM memory for bi-directional data passing
     pub memory: MEM,
     /// The tx context contains references to host structures.
-    pub ctx: TxCtx<'a, D, H, CA>,
+    pub ctx: TxCtx<D, H, CA>,
 }
 
 /// A transaction's host context
 #[derive(Debug)]
-pub struct TxCtx<'a, D, H, CA>
+pub struct TxCtx<D, H, CA>
 where
     D: DB + for<'iter> DBIter<'iter>,
     H: StorageHasher,
     CA: WasmCacheAccess,
 {
     /// Mutable access to write log.
-    pub write_log: MutHostRef<'a, &'a WriteLog>,
+    pub write_log: HostRef<RwAccess, WriteLog>,
     /// Read-only access to in-memory state.
-    pub in_mem: HostRef<'a, &'a InMemory<H>>,
+    pub in_mem: HostRef<RoAccess, InMemory<H>>,
     /// Read-only access to DB.
-    pub db: HostRef<'a, &'a D>,
+    pub db: HostRef<RoAccess, D>,
     /// Storage prefix iterators.
-    pub iterators: MutHostRef<'a, &'a PrefixIterators<'a, D>>,
+    pub iterators: HostRef<RwAccess, PrefixIterators<'static, D>>,
     /// Transaction gas meter. In  `RefCell` to charge gas in read-only fns.
-    pub gas_meter: HostRef<'a, &'a RefCell<TxGasMeter>>,
+    pub gas_meter: HostRef<RoAccess, RefCell<TxGasMeter>>,
     /// Transaction sentinel. In  `RefCell` to charge gas in read-only fns.
-    pub sentinel: HostRef<'a, &'a RefCell<TxSentinel>>,
+    pub sentinel: HostRef<RoAccess, RefCell<TxSentinel>>,
     /// The transaction code is used for signature verification
-    pub tx: HostRef<'a, &'a Tx>,
+    pub tx: HostRef<RoAccess, Tx>,
     /// The transaction index is used to identify a shielded transaction's
     /// parent
-    pub tx_index: HostRef<'a, &'a TxIndex>,
+    pub tx_index: HostRef<RoAccess, TxIndex>,
     /// The verifiers whose validity predicates should be triggered.
-    pub verifiers: MutHostRef<'a, &'a BTreeSet<Address>>,
+    pub verifiers: HostRef<RwAccess, BTreeSet<Address>>,
     /// Cache for 2-step reads from host environment.
-    pub result_buffer: MutHostRef<'a, &'a Option<Vec<u8>>>,
+    pub result_buffer: HostRef<RwAccess, Option<Vec<u8>>>,
     /// Storage for byte buffer values yielded from the guest.
-    pub yielded_value: MutHostRef<'a, &'a Option<Vec<u8>>>,
+    pub yielded_value: HostRef<RwAccess, Option<Vec<u8>>>,
     /// VP WASM compilation cache (this is available in tx context, because
     /// we're pre-compiling VPs from [`tx_init_account`])
     #[cfg(feature = "wasm-runtime")]
-    pub vp_wasm_cache: MutHostRef<'a, &'a VpCache<CA>>,
+    pub vp_wasm_cache: HostRef<RwAccess, VpCache<CA>>,
     /// Tx WASM compilation cache
     #[cfg(feature = "wasm-runtime")]
-    pub tx_wasm_cache: MutHostRef<'a, &'a TxCache<CA>>,
+    pub tx_wasm_cache: HostRef<RwAccess, TxCache<CA>>,
     /// To avoid unused parameter without "wasm-runtime" feature
     #[cfg(not(feature = "wasm-runtime"))]
     pub cache_access: std::marker::PhantomData<CA>,
@@ -176,21 +176,21 @@ where
         #[cfg(feature = "wasm-runtime")] vp_wasm_cache: &mut VpCache<CA>,
         #[cfg(feature = "wasm-runtime")] tx_wasm_cache: &mut TxCache<CA>,
     ) -> Self {
-        let write_log = unsafe { MutHostRef::new(write_log) };
+        let write_log = unsafe { HostRef::new(write_log) };
         let in_mem = unsafe { HostRef::new(in_mem) };
         let db = unsafe { HostRef::new(db) };
-        let iterators = unsafe { MutHostRef::new(iterators) };
+        let iterators = unsafe { HostRef::new(iterators) };
         let gas_meter = unsafe { HostRef::new(gas_meter) };
         let sentinel = unsafe { HostRef::new(sentinel) };
         let tx = unsafe { HostRef::new(tx) };
         let tx_index = unsafe { HostRef::new(tx_index) };
-        let verifiers = unsafe { MutHostRef::new(verifiers) };
-        let result_buffer = unsafe { MutHostRef::new(result_buffer) };
-        let yielded_value = unsafe { MutHostRef::new(yielded_value) };
+        let verifiers = unsafe { HostRef::new(verifiers) };
+        let result_buffer = unsafe { HostRef::new(result_buffer) };
+        let yielded_value = unsafe { HostRef::new(yielded_value) };
         #[cfg(feature = "wasm-runtime")]
-        let vp_wasm_cache = unsafe { MutHostRef::new(vp_wasm_cache) };
+        let vp_wasm_cache = unsafe { HostRef::new(vp_wasm_cache) };
         #[cfg(feature = "wasm-runtime")]
-        let tx_wasm_cache = unsafe { MutHostRef::new(tx_wasm_cache) };
+        let tx_wasm_cache = unsafe { HostRef::new(tx_wasm_cache) };
         let ctx = TxCtx {
             write_log,
             db,
@@ -220,7 +220,7 @@ where
     }
 }
 
-impl<MEM, D, H, CA> Clone for TxVmEnv<'_, MEM, D, H, CA>
+impl<MEM, D, H, CA> Clone for TxVmEnv<MEM, D, H, CA>
 where
     MEM: VmMemory,
     D: DB + for<'iter> DBIter<'iter>,
@@ -235,7 +235,7 @@ where
     }
 }
 
-impl<'a, D, H, CA> TxCtx<'a, D, H, CA>
+impl<D, H, CA> TxCtx<D, H, CA>
 where
     D: DB + for<'iter> DBIter<'iter>,
     H: StorageHasher,
@@ -243,7 +243,7 @@ where
 {
     /// Access state from within a tx
     pub fn state(&self) -> TxHostEnvState<D, H> {
-        let write_log = unsafe { self.write_log.get() };
+        let write_log = unsafe { self.write_log.get_mut() };
         let db = unsafe { self.db.get() };
         let in_mem = unsafe { self.in_mem.get() };
         let gas_meter = unsafe { self.gas_meter.get() };
@@ -267,7 +267,7 @@ where
     }
 }
 
-impl<'a, D, H, CA> Clone for TxCtx<'a, D, H, CA>
+impl<D, H, CA> Clone for TxCtx<D, H, CA>
 where
     D: DB + for<'iter> DBIter<'iter>,
     H: StorageHasher,
@@ -297,7 +297,7 @@ where
 }
 
 /// A validity predicate's host environment
-pub struct VpVmEnv<'a, MEM, D, H, EVAL, CA>
+pub struct VpVmEnv<MEM, D, H, EVAL, CA>
 where
     MEM: VmMemory,
     D: DB + for<'iter> DBIter<'iter>,
@@ -308,11 +308,11 @@ where
     /// The VM memory for bi-directional data passing
     pub memory: MEM,
     /// The VP context contains references to host structures.
-    pub ctx: VpCtx<'a, D, H, EVAL, CA>,
+    pub ctx: VpCtx<D, H, EVAL, CA>,
 }
 
 /// A validity predicate's host context
-pub struct VpCtx<'a, D, H, EVAL, CA>
+pub struct VpCtx<D, H, EVAL, CA>
 where
     D: DB + for<'iter> DBIter<'iter>,
     H: StorageHasher,
@@ -320,36 +320,36 @@ where
     CA: WasmCacheAccess,
 {
     /// The address of the account that owns the VP
-    pub address: HostRef<'a, &'a Address>,
+    pub address: HostRef<RoAccess, Address>,
     /// Read-only access to write log.
-    pub write_log: HostRef<'a, &'a WriteLog>,
+    pub write_log: HostRef<RoAccess, WriteLog>,
     /// Read-only access to in-memory state.
-    pub in_mem: HostRef<'a, &'a InMemory<H>>,
+    pub in_mem: HostRef<RoAccess, InMemory<H>>,
     /// Read-only access to DB.
-    pub db: HostRef<'a, &'a D>,
+    pub db: HostRef<RoAccess, D>,
     /// Storage prefix iterators.
-    pub iterators: MutHostRef<'a, &'a PrefixIterators<'a, D>>,
+    pub iterators: HostRef<RwAccess, PrefixIterators<'static, D>>,
     /// VP gas meter. In  `RefCell` to charge gas in read-only fns.
-    pub gas_meter: HostRef<'a, &'a RefCell<VpGasMeter>>,
+    pub gas_meter: HostRef<RoAccess, RefCell<VpGasMeter>>,
     /// The transaction code is used for signature verification
-    pub tx: HostRef<'a, &'a Tx>,
+    pub tx: HostRef<RoAccess, Tx>,
     /// The transaction index is used to identify a shielded transaction's
     /// parent
-    pub tx_index: HostRef<'a, &'a TxIndex>,
+    pub tx_index: HostRef<RoAccess, TxIndex>,
     /// The runner of the [`vp_eval`] function
-    pub eval_runner: HostRef<'a, &'a EVAL>,
+    pub eval_runner: HostRef<RoAccess, EVAL>,
     /// Cache for 2-step reads from host environment.
-    pub result_buffer: MutHostRef<'a, &'a Option<Vec<u8>>>,
+    pub result_buffer: HostRef<RwAccess, Option<Vec<u8>>>,
     /// Storage for byte buffer values yielded from the guest.
-    pub yielded_value: MutHostRef<'a, &'a Option<Vec<u8>>>,
+    pub yielded_value: HostRef<RwAccess, Option<Vec<u8>>>,
     /// The storage keys that have been changed. Used for calls to `eval`.
-    pub keys_changed: HostRef<'a, &'a BTreeSet<Key>>,
+    pub keys_changed: HostRef<RoAccess, BTreeSet<Key>>,
     /// The verifiers whose validity predicates should be triggered. Used for
     /// calls to `eval`.
-    pub verifiers: HostRef<'a, &'a BTreeSet<Address>>,
+    pub verifiers: HostRef<RoAccess, BTreeSet<Address>>,
     /// VP WASM compilation cache
     #[cfg(feature = "wasm-runtime")]
-    pub vp_wasm_cache: MutHostRef<'a, &'a VpCache<CA>>,
+    pub vp_wasm_cache: HostRef<RwAccess, VpCache<CA>>,
     /// To avoid unused parameter without "wasm-runtime" feature
     #[cfg(not(feature = "wasm-runtime"))]
     pub cache_access: std::marker::PhantomData<CA>,
@@ -373,13 +373,13 @@ pub trait VpEvaluator {
     /// shares mutable access to the host context with the VP.
     fn eval(
         &self,
-        ctx: VpCtx<'static, Self::Db, Self::H, Self::Eval, Self::CA>,
+        ctx: VpCtx<Self::Db, Self::H, Self::Eval, Self::CA>,
         vp_code_hash: Hash,
         input_data: Tx,
     ) -> HostEnvResult;
 }
 
-impl<'a, MEM, D, H, EVAL, CA> VpVmEnv<'a, MEM, D, H, EVAL, CA>
+impl<MEM, D, H, EVAL, CA> VpVmEnv<MEM, D, H, EVAL, CA>
 where
     D: DB + for<'iter> DBIter<'iter>,
     H: StorageHasher,
@@ -404,7 +404,7 @@ where
         gas_meter: &RefCell<VpGasMeter>,
         tx: &Tx,
         tx_index: &TxIndex,
-        iterators: &mut PrefixIterators<'a, D>,
+        iterators: &mut PrefixIterators<'static, D>,
         verifiers: &BTreeSet<Address>,
         result_buffer: &mut Option<Vec<u8>>,
         yielded_value: &mut Option<Vec<u8>>,
@@ -439,7 +439,7 @@ where
     }
 }
 
-impl<'a, MEM, D, H, EVAL, CA> Clone for VpVmEnv<'a, MEM, D, H, EVAL, CA>
+impl<MEM, D, H, EVAL, CA> Clone for VpVmEnv<MEM, D, H, EVAL, CA>
 where
     MEM: VmMemory,
     D: DB + for<'iter> DBIter<'iter>,
@@ -455,7 +455,7 @@ where
     }
 }
 
-impl<'a, D, H, EVAL, CA> VpCtx<'a, D, H, EVAL, CA>
+impl<D, H, EVAL, CA> VpCtx<D, H, EVAL, CA>
 where
     D: DB + for<'iter> DBIter<'iter>,
     H: StorageHasher,
@@ -478,7 +478,7 @@ where
         gas_meter: &RefCell<VpGasMeter>,
         tx: &Tx,
         tx_index: &TxIndex,
-        iterators: &mut PrefixIterators<'a, D>,
+        iterators: &mut PrefixIterators<'static, D>,
         verifiers: &BTreeSet<Address>,
         result_buffer: &mut Option<Vec<u8>>,
         yielded_value: &mut Option<Vec<u8>>,
@@ -492,15 +492,15 @@ where
         let in_mem = unsafe { HostRef::new(in_mem) };
         let tx = unsafe { HostRef::new(tx) };
         let tx_index = unsafe { HostRef::new(tx_index) };
-        let iterators = unsafe { MutHostRef::new(iterators) };
+        let iterators = unsafe { HostRef::new(iterators) };
         let gas_meter = unsafe { HostRef::new(gas_meter) };
         let verifiers = unsafe { HostRef::new(verifiers) };
-        let result_buffer = unsafe { MutHostRef::new(result_buffer) };
-        let yielded_value = unsafe { MutHostRef::new(yielded_value) };
+        let result_buffer = unsafe { HostRef::new(result_buffer) };
+        let yielded_value = unsafe { HostRef::new(yielded_value) };
         let keys_changed = unsafe { HostRef::new(keys_changed) };
         let eval_runner = unsafe { HostRef::new(eval_runner) };
         #[cfg(feature = "wasm-runtime")]
-        let vp_wasm_cache = unsafe { MutHostRef::new(vp_wasm_cache) };
+        let vp_wasm_cache = unsafe { HostRef::new(vp_wasm_cache) };
         Self {
             address,
             write_log,
@@ -543,7 +543,7 @@ where
     }
 }
 
-impl<'a, D, H, EVAL, CA> Clone for VpCtx<'a, D, H, EVAL, CA>
+impl<D, H, EVAL, CA> Clone for VpCtx<D, H, EVAL, CA>
 where
     D: DB + for<'iter> DBIter<'iter>,
     H: StorageHasher,
@@ -2284,7 +2284,7 @@ where
 
 /// Evaluate a validity predicate with the given input data.
 pub fn vp_eval<MEM, D, H, EVAL, CA>(
-    env: &VpVmEnv<'static, MEM, D, H, EVAL, CA>,
+    env: &VpVmEnv<MEM, D, H, EVAL, CA>,
     vp_code_hash_ptr: u64,
     vp_code_hash_len: u64,
     input_data_ptr: u64,
@@ -2517,14 +2517,7 @@ pub mod testing {
         keys_changed: &BTreeSet<Key>,
         eval_runner: &EVAL,
         #[cfg(feature = "wasm-runtime")] vp_wasm_cache: &mut VpCache<CA>,
-    ) -> VpVmEnv<
-        'static,
-        NativeMemory,
-        <S as StateRead>::D,
-        <S as StateRead>::H,
-        EVAL,
-        CA,
-    >
+    ) -> VpVmEnv<NativeMemory, <S as StateRead>::D, <S as StateRead>::H, EVAL, CA>
     where
         S: StateRead,
         EVAL: VpEvaluator,

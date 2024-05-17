@@ -32,7 +32,8 @@ use crate::vm::types::VpInput;
 use crate::vm::wasm::host_env::{tx_imports, vp_imports};
 use crate::vm::wasm::{memory, Cache, CacheName, VpCache};
 use crate::vm::{
-    validate_untrusted_wasm, MutHostRef, WasmCacheAccess, WasmValidationError,
+    validate_untrusted_wasm, HostRef, RwAccess, WasmCacheAccess,
+    WasmValidationError,
 };
 
 const TX_ENTRYPOINT: &str = "_apply_tx";
@@ -350,7 +351,7 @@ fn run_vp(
     address: &Address,
     keys_changed: &BTreeSet<Key>,
     verifiers: &BTreeSet<Address>,
-    yielded_value: MutHostRef<'_, &'_ Option<Vec<u8>>>,
+    yielded_value: HostRef<RwAccess, Option<Vec<u8>>>,
 ) -> Result<()> {
     let input: VpInput = VpInput {
         addr: address,
