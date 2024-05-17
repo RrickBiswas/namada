@@ -31,7 +31,7 @@ use namada::vote_ext::ethereum_tx_data_variants;
 
 use super::*;
 use crate::facade::tendermint::abci::types::VoteInfo;
-use crate::node::ledger::shell::stats::InternalStats;
+use crate::shell::stats::InternalStats;
 
 impl<D, H> Shell<D, H>
 where
@@ -822,9 +822,9 @@ mod test_finalize_block {
 
     use super::*;
     use crate::facade::tendermint::abci::types::Validator;
-    use crate::node::ledger::oracle::control::Command;
-    use crate::node::ledger::shell::test_utils::*;
-    use crate::node::ledger::shims::abcipp_shim_types::shim::request::{
+    use crate::oracle::control::Command;
+    use crate::shell::test_utils::*;
+    use crate::shims::abcipp_shim_types::shim::request::{
         FinalizeBlock, ProcessedTx,
     };
 
@@ -1168,7 +1168,7 @@ mod test_finalize_block {
         test_bp(|shell: &mut TestShell| {
             let asset = EthAddress([0xff; 20]);
             let receiver = EthAddress([0xaa; 20]);
-            let bertha = crate::wallet::defaults::bertha_address();
+            let bertha = namada_apps_lib::wallet::defaults::bertha_address();
             // add bertha's escrowed `asset` to the pool
             {
                 let token = wrapped_erc20s::token(&asset);
@@ -1225,8 +1225,10 @@ mod test_finalize_block {
                 transfers: vec![transfer],
                 relayer: bertha,
             };
-            let (protocol_key, _) = crate::wallet::defaults::validator_keys();
-            let validator_addr = crate::wallet::defaults::validator_address();
+            let (protocol_key, _) =
+                namada_apps_lib::wallet::defaults::validator_keys();
+            let validator_addr =
+                namada_apps_lib::wallet::defaults::validator_address();
             let ext = {
                 let ext = ethereum_events::Vext {
                     validator_addr,
@@ -2469,8 +2471,10 @@ mod test_finalize_block {
     fn test_replay_keys_not_merklized() {
         let (mut shell, _, _, _) = setup();
 
-        let (wrapper_tx, processed_tx) =
-            mk_wrapper_tx(&shell, &crate::wallet::defaults::albert_keypair());
+        let (wrapper_tx, processed_tx) = mk_wrapper_tx(
+            &shell,
+            &namada_apps_lib::wallet::defaults::albert_keypair(),
+        );
 
         let wrapper_hash_key =
             replay_protection::current_key(&wrapper_tx.header_hash());
@@ -2576,8 +2580,8 @@ mod test_finalize_block {
     #[test]
     fn test_duplicated_tx_same_block() {
         let (mut shell, _broadcaster, _, _) = setup();
-        let keypair = crate::wallet::defaults::albert_keypair();
-        let keypair_2 = crate::wallet::defaults::bertha_keypair();
+        let keypair = namada_apps_lib::wallet::defaults::albert_keypair();
+        let keypair_2 = namada_apps_lib::wallet::defaults::bertha_keypair();
 
         let tx_code = TestWasms::TxNoOp.read_bytes();
         let mut wrapper =
@@ -2685,8 +2689,8 @@ mod test_finalize_block {
     #[test]
     fn test_duplicated_tx_same_block_with_failure() {
         let (mut shell, _, _, _) = setup();
-        let keypair = crate::wallet::defaults::albert_keypair();
-        let keypair_2 = crate::wallet::defaults::bertha_keypair();
+        let keypair = namada_apps_lib::wallet::defaults::albert_keypair();
+        let keypair_2 = namada_apps_lib::wallet::defaults::bertha_keypair();
 
         let tx_code = TestWasms::TxWriteStorageKey.read_bytes();
         let mut wrapper =
@@ -2788,7 +2792,7 @@ mod test_finalize_block {
     #[test]
     fn test_tx_hash_handling() {
         let (mut shell, _broadcaster, _, _) = setup();
-        let keypair = crate::wallet::defaults::bertha_keypair();
+        let keypair = namada_apps_lib::wallet::defaults::bertha_keypair();
         let mut out_of_gas_wrapper = {
             let tx_code = TestWasms::TxNoOp.read_bytes();
             let mut wrapper_tx =
@@ -3066,7 +3070,7 @@ mod test_finalize_block {
     #[test]
     fn test_fee_payment_if_invalid_inner_tx() {
         let (mut shell, _, _, _) = setup();
-        let keypair = crate::wallet::defaults::albert_keypair();
+        let keypair = namada_apps_lib::wallet::defaults::albert_keypair();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -3259,7 +3263,7 @@ mod test_finalize_block {
                     amount_per_gas_unit: DenominatedAmount::native(1.into()),
                     token: shell.state.in_mem().native_token.clone(),
                 },
-                crate::wallet::defaults::albert_keypair().ref_to(),
+                namada_apps_lib::wallet::defaults::albert_keypair().ref_to(),
                 5_000_000.into(),
                 None,
             ))));
@@ -3268,7 +3272,7 @@ mod test_finalize_block {
         wrapper.set_data(Data::new("Transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Authorization(Authorization::new(
             wrapper.sechashes(),
-            [(0, crate::wallet::defaults::albert_keypair())]
+            [(0, namada_apps_lib::wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
             None,

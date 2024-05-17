@@ -63,6 +63,7 @@ use namada::tx::{Section, Tx};
 use namada::vm::wasm::{TxCache, VpCache};
 use namada::vm::{WasmCacheAccess, WasmCacheRwAccess};
 use namada::vote_ext::EthereumTxData;
+use namada_apps_lib::wallet::{self, ValidatorData, ValidatorKeys};
 use namada_sdk::eth_bridge::{EthBridgeQueries, EthereumOracleConfig};
 use namada_sdk::tendermint::AppHash;
 use thiserror::Error;
@@ -73,11 +74,9 @@ use crate::config::{self, genesis, TendermintMode, ValidatorLocalConfig};
 use crate::facade::tendermint::v0_37::abci::{request, response};
 use crate::facade::tendermint::{self, validator};
 use crate::facade::tendermint_proto::v0_37::crypto::public_key;
-use crate::node::ledger;
-use crate::node::ledger::shims::abcipp_shim_types::shim;
-use crate::node::ledger::shims::abcipp_shim_types::shim::response::TxResult;
-use crate::node::ledger::{storage, tendermint_node};
-use crate::wallet::{ValidatorData, ValidatorKeys};
+use crate::shims::abcipp_shim_types::shim;
+use crate::shims::abcipp_shim_types::shim::response::TxResult;
+use crate::{storage, tendermint_node};
 
 fn key_to_tendermint(
     pk: &common::PublicKey,
@@ -459,7 +458,7 @@ where
                         "Loading wallet from {}",
                         wallet_path.to_string_lossy()
                     );
-                    let mut wallet = crate::wallet::load(wallet_path)
+                    let mut wallet = wallet::load(wallet_path)
                         .expect("Validator node must have a wallet");
                     let validator_local_config_path =
                         wallet_path.join("validator_local_config.toml");
@@ -493,11 +492,10 @@ where
                 #[cfg(test)]
                 {
                     let (protocol_keypair, eth_bridge_keypair) =
-                        crate::wallet::defaults::validator_keys();
+                        wallet::defaults::validator_keys();
                     ShellMode::Validator {
                         data: ValidatorData {
-                            address: crate::wallet::defaults::validator_address(
-                            ),
+                            address: wallet::defaults::validator_address(),
                             keys: ValidatorKeys {
                                 protocol_keypair,
                                 eth_bridge_keypair,
@@ -554,7 +552,7 @@ where
     /// Load the Merkle root hash and the height of the last committed block, if
     /// any. This is returned when ABCI sends an `info` request.
     pub fn last_state(&self) -> response::Info {
-        if ledger::migrating_state().is_some() {
+        if crate::migrating_state().is_some() {
             // When migrating state, return a height of 0, such
             // that CometBFT calls InitChain and subsequently
             // updates the apphash in its state.
@@ -712,7 +710,7 @@ where
 
     /// Broadcast any pending protocol transactions.
     fn broadcast_protocol_txs(&mut self) {
-        use crate::node::ledger::shell::vote_extensions::iter_protocol_txs;
+        use crate::shell::vote_extensions::iter_protocol_txs;
 
         let ext = self.craft_extension();
 
@@ -1468,8 +1466,8 @@ mod test_utils {
     use crate::facade::tendermint_proto::v0_37::abci::{
         RequestPrepareProposal, RequestProcessProposal,
     };
-    use crate::node::ledger::shims::abcipp_shim_types;
-    use crate::node::ledger::shims::abcipp_shim_types::shim::request::{
+    use crate::shims::abcipp_shim_types;
+    use crate::shims::abcipp_shim_types::shim::request::{
         FinalizeBlock, ProcessedTx,
     };
 
@@ -1682,7 +1680,7 @@ mod test_utils {
                         .collect(),
                     proposer_address: HEXUPPER
                         .decode(
-                            crate::wallet::defaults::validator_keypair()
+                            wallet::defaults::validator_keypair()
                                 .to_public()
                                 .tm_raw_hash()
                                 .as_bytes(),
@@ -1730,7 +1728,7 @@ mod test_utils {
         ) -> abcipp_shim_types::shim::response::PrepareProposal {
             req.proposer_address = HEXUPPER
                 .decode(
-                    crate::wallet::defaults::validator_keypair()
+                    wallet::defaults::validator_keypair()
                         .to_public()
                         .tm_raw_hash()
                         .as_bytes(),
@@ -1912,7 +1910,7 @@ mod test_utils {
                 txs: vec![],
                 proposer_address: HEXUPPER
                     .decode(
-                        crate::wallet::defaults::validator_keypair()
+                        wallet::defaults::validator_keypair()
                             .to_public()
                             .tm_raw_hash()
                             .as_bytes(),
@@ -1988,10 +1986,10 @@ mod shell_tests {
         bridge_pool_roots, ethereum_events, ethereum_tx_data_variants,
     };
     use namada::{address, replay_protection};
+    use wallet;
 
     use super::*;
-    use crate::node::ledger::shell::token::DenominatedAmount;
-    use crate::wallet;
+    use crate::shell::token::DenominatedAmount;
 
     const GAS_LIMIT_MULTIPLIER: u64 = 100_000;
 
@@ -2659,7 +2657,7 @@ mod shell_tests {
                     ),
                     token: address::testing::apfel(),
                 },
-                crate::wallet::defaults::albert_keypair().ref_to(),
+                wallet::defaults::albert_keypair().ref_to(),
                 GAS_LIMIT_MULTIPLIER.into(),
                 None,
             ))));
@@ -2668,7 +2666,7 @@ mod shell_tests {
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Authorization(Authorization::new(
             wrapper.sechashes(),
-            [(0, crate::wallet::defaults::albert_keypair())]
+            [(0, wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
             None,
@@ -2693,7 +2691,7 @@ mod shell_tests {
                     amount_per_gas_unit: DenominatedAmount::native(0.into()),
                     token: shell.state.in_mem().native_token.clone(),
                 },
-                crate::wallet::defaults::albert_keypair().ref_to(),
+                wallet::defaults::albert_keypair().ref_to(),
                 GAS_LIMIT_MULTIPLIER.into(),
                 None,
             ))));
@@ -2702,7 +2700,7 @@ mod shell_tests {
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Authorization(Authorization::new(
             wrapper.sechashes(),
-            [(0, crate::wallet::defaults::albert_keypair())]
+            [(0, wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
             None,
@@ -2728,7 +2726,7 @@ mod shell_tests {
                     ),
                     token: shell.state.in_mem().native_token.clone(),
                 },
-                crate::wallet::defaults::albert_keypair().ref_to(),
+                wallet::defaults::albert_keypair().ref_to(),
                 150_000.into(),
                 None,
             ))));
@@ -2737,7 +2735,7 @@ mod shell_tests {
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Authorization(Authorization::new(
             wrapper.sechashes(),
-            [(0, crate::wallet::defaults::albert_keypair())]
+            [(0, wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
             None,
@@ -2763,7 +2761,7 @@ mod shell_tests {
                     ),
                     token: shell.state.in_mem().native_token.clone(),
                 },
-                crate::wallet::defaults::albert_keypair().ref_to(),
+                wallet::defaults::albert_keypair().ref_to(),
                 GAS_LIMIT_MULTIPLIER.into(),
                 None,
             ))));
@@ -2772,7 +2770,7 @@ mod shell_tests {
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.add_section(Section::Authorization(Authorization::new(
             wrapper.sechashes(),
-            [(0, crate::wallet::defaults::albert_keypair())]
+            [(0, wallet::defaults::albert_keypair())]
                 .into_iter()
                 .collect(),
             None,

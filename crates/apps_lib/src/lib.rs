@@ -1,4 +1,4 @@
-//! Shared code for the node, client etc.
+//! Shared code for the Namada apps.
 
 #![doc(html_favicon_url = "https://dev.namada.net/master/favicon.png")]
 #![doc(html_logo_url = "https://dev.namada.net/master/rustdoc-logo.png")]
@@ -13,13 +13,11 @@
     clippy::arithmetic_side_effects
 )]
 
-#[cfg(feature = "benches")]
-pub mod bench_utils;
 pub mod cli;
 pub mod client;
 pub mod config;
 pub mod logging;
-pub mod node;
+pub mod tendermint_node;
 pub mod wallet;
 pub mod wasm_loader;
 
@@ -32,8 +30,4 @@ pub mod facade {
     // TODO: re-import v0_37 only
     pub use namada::{tendermint, tendermint_proto, tendermint_rpc};
     pub use tendermint_config;
-    pub mod tower_abci {
-        pub use tower_abci::v037::*;
-        pub use tower_abci::BoxError;
-    }
 }
