@@ -79,18 +79,35 @@ impl EmitEvents for Vec<Event> {
     #[inline]
     fn emit<E>(&mut self, event: E)
     where
-        E: Into<Event>,
+        E: EventToEmit,
     {
         self.push(event.into());
     }
 
-    /// Emit a batch of [events](Event).
     fn emit_many<B, E>(&mut self, event_batch: B)
     where
         B: IntoIterator<Item = E>,
-        E: Into<Event>,
+        E: EventToEmit,
     {
         self.extend(event_batch.into_iter().map(Into::into));
+    }
+}
+
+impl<EE: EmitEvents> EmitEvents for &mut EE {
+    #[inline]
+    fn emit<E>(&mut self, event: E)
+    where
+        E: EventToEmit,
+    {
+        (*self).emit(event);
+    }
+
+    fn emit_many<B, E>(&mut self, event_batch: B)
+    where
+        B: IntoIterator<Item = E>,
+        E: EventToEmit,
+    {
+        (*self).emit_many(event_batch);
     }
 }
 
